@@ -1,0 +1,6 @@
+FROM golang:1.25-trixie
+
+WORKDIR /app
+COPY . .
+RUN go build -o ticker ./cmd/ticker
+CMD ["./ticker"]

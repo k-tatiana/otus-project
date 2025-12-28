@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'otus-project'
+
+scrape_configs:
+  - job_name: 'otus-server'
+    static_configs:
+      - targets: ['single-server:8100']
+    metrics_path: '/metrics'
+    scrape_interval: 5s

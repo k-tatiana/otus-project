@@ -1,0 +1,18 @@
+{
+	"ulid": "01KDDSVZ0TVF54MWEXV5RC5FP7",
+	"minTime": 1766757649721,
+	"maxTime": 1766764800000,
+	"stats": {
+		"numSamples": 4248,
+		"numFloatSamples": 4248,
+		"numSeries": 118,
+		"numChunks": 118
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01KDDSVZ0TVF54MWEXV5RC5FP7"
+		]
+	},
+	"version": 1
+}

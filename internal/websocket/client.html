@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Tunnel Client</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 600px;
+            padding: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+            text-align: center;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ccc;
+            transition: background 0.3s;
+        }
+
+        .status-indicator.connected {
+            background: #4caf50;
+        }
+
+        .status-indicator.disconnected {
+            background: #f44336;
+        }
+
+        .status-text {
+            color: #666;
+            flex: 1;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .messages {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: auto;
+            padding: 15px;
+            margin-bottom: 20px;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 12px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .message.sent {
+            background: #e3f2fd;
+            color: #1976d2;
+            text-align: right;
+            margin-left: 20px;
+        }
+
+        .message.received {
+            background: #f3e5f5;
+            color: #7b1fa2;
+            margin-right: 20px;
+        }
+
+        .message.system {
+            background: #fff3e0;
+            color: #e65100;
+            text-align: center;
+            font-style: italic;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button.secondary {
+            background: #757575;
+            flex: 1;
+        }
+
+        button.secondary:hover:not(:disabled) {
+            background: #616161;
+        }
+
+        button.primary {
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket Tunnel</h1>
+
+        <div class="status">
+            <div class="status-indicator disconnected" id="statusIndicator"></div>
+            <span class="status-text" id="statusText">Disconnected</span>
+        </div>
+
+        <div class="messages" id="messages"></div>
+
+        <div class="input-group">
+            <input
+                type="text"
+                id="messageInput"
+                placeholder="Enter message..."
+                disabled
+            />
+            <button id="sendBtn" disabled>Send</button>
+        </div>
+
+        <div class="button-group">
+            <button id="connectBtn" class="primary">Connect</button>
+            <button id="disconnectBtn" class="secondary" disabled>Disconnect</button>
+        </div>
+    </div>
+
+    <script>
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+
+        let ws = null;
+
+        function updateStatus(connected) {
+            if (connected) {
+                statusIndicator.classList.remove('disconnected');
+                statusIndicator.classList.add('connected');
+                statusText.textContent = 'Connected';
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                statusIndicator.classList.remove('connected');
+                statusIndicator.classList.add('disconnected');
+                statusText.textContent = 'Disconnected';
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function addMessage(text, type) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            messageEl.textContent = text;
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        connectBtn.addEventListener('click', () => {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                updateStatus(true);
+                addMessage('Connected to WebSocket tunnel', 'system');
+            };
+
+            ws.onmessage = (event) => {
+                addMessage(`Received: ${event.data}`, 'received');
+            };
+
+            ws.onerror = (error) => {
+                addMessage(`Error: ${error.message || 'WebSocket error'}`, 'system');
+            };
+
+            ws.onclose = () => {
+                updateStatus(false);
+                addMessage('Disconnected from WebSocket tunnel', 'system');
+            };
+        });
+
+        disconnectBtn.addEventListener('click', () => {
+            if (ws) {
+                ws.close();
+            }
+        });
+
+        sendBtn.addEventListener('click', () => {
+            const message = messageInput.value.trim();
+            if (message && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+                addMessage(`Sent: ${message}`, 'sent');
+                messageInput.value = '';
+                messageInput.focus();
+            }
+        });
+
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendBtn.click();
+            }
+        });
+
+        updateStatus(false);
+    </script>
+</body>
+</html>

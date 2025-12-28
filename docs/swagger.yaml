@@ -1,0 +1,560 @@
+openapi: 3.0.3
+info:
+  title: OTUS Project API
+  description: REST API for OTUS diploma project (loyalty points, users, mock auth, WebSocket, metrics).
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8100
+    description: Local development server
+
+tags:
+  - name: health
+    description: Health check endpoints
+  - name: auth
+    description: Authentication endpoints (mock OAuth flow)
+  - name: points
+    description: Loyalty points information
+  - name: users
+    description: Customers management endpoints
+  - name: websocket
+    description: WebSocket endpoint
+  - name: metrics
+    description: Prometheus metrics endpoint
+
+paths:
+  /ping:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Returns 200 OK to indicate the server is running.
+      responses:
+        '200':
+          description: Server is healthy
+
+  /metrics:
+    get:
+      tags:
+        - metrics
+      summary: Prometheus metrics
+      description: Exposes Prometheus metrics.
+      responses:
+        '200':
+          description: Metrics in Prometheus text format
+
+  /auth/login:
+    get:
+      tags:
+        - auth
+      summary: Initiate login
+      description: Redirects to the OAuth callback with a mock authorization code.
+      responses:
+        '302':
+          description: Redirect to /auth/callback with mock code
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /auth/callback?code=mock-code
+
+  /auth/callback:
+    get:
+      tags:
+        - auth
+      summary: OAuth callback
+      description: Completes the mock OAuth flow, creates a session, and sets a session cookie.
+      parameters:
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+          description: User ID (customer id) used for mock authentication.
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Authorization code (must be "mock-code")
+      responses:
+        '200':
+          description: Login successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session_id=abc123; Path=/; HttpOnly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid authorization code or missing/invalid user_id
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidCode:
+                  summary: Invalid authorization code
+                  value: invalid authorization code
+                invalidUserId:
+                  summary: Invalid or missing user_id
+                  value: invalid user_id
+        '500':
+          description: Internal server error
+
+  /ws:
+    get:
+      tags:
+        - websocket
+      summary: WebSocket connection
+      description: Upgrades HTTP connection to WebSocket. Requires valid session.
+      parameters:
+        - name: session_id
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Session identifier obtained from /auth/callback.
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+        '401':
+          description: Unauthorized - missing or invalid session
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Unauthorized
+
+  /auth/logout:
+    get:
+      tags:
+        - auth
+      summary: Logout
+      description: Deletes the user session and clears the session cookie.
+      responses:
+        '200':
+          description: Logout successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session_id=; Path=/; HttpOnly; Expires=Thu, 01 Jan 1970 00:00:00 GMT
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: logged out
+
+  /api/points/get:
+    get:
+      tags:
+        - points
+      summary: Get loyalty points information
+      description: Returns loyalty points balance and loyalty level for the provided user.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: User identifier used to lookup points.
+      responses:
+        '200':
+          description: Loyalty points information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointsInfo'
+        '400':
+          description: Bad request
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: user_id is required
+        '401':
+          description: Unauthorized - missing or invalid session
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: unauthorized
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: failed to fetch points
+
+  /api/points/use:
+    post:
+      tags:
+        - points
+      summary: Deduct loyalty points
+      description: Deducts points from a user's account.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: User identifier used to deduct points.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsePointsRequest'
+      responses:
+        '200':
+          description: Points deducted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsePointsResponse'
+        '400':
+          description: Bad request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidBody:
+                  summary: Invalid JSON body
+                  value: invalid request body
+                invalidAmount:
+                  summary: Amount must be positive
+                  value: amount must be positive
+                missingUserId:
+                  summary: Missing user_id
+                  value: user_id is required
+        '401':
+          description: Unauthorized - missing or invalid session
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: unauthorized
+        '402':
+          description: Insufficient funds
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: insufficient funds
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: user not found
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                beginTx:
+                  summary: Failed to start transaction
+                  value: internal server error
+                updateFailed:
+                  summary: Failed to update balance
+                  value: failed to update balance
+                commitFailed:
+                  summary: Failed to commit transaction
+                  value: failed to commit transaction
+
+  /api/points/add:
+    post:
+      tags:
+        - points
+      summary: Add loyalty points
+      description: Adds points to a user's account.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: User identifier to add points to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPointsRequest'
+      responses:
+        '200':
+          description: Points added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddPointsResponse'
+        '400':
+          description: Bad request
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                invalidBody:
+                  summary: Invalid JSON body
+                  value: invalid request body
+                invalidAmount:
+                  summary: Amount must be positive
+                  value: amount must be positive
+                missingUserId:
+                  summary: Missing user_id
+                  value: user_id is required
+        '401':
+          description: Unauthorized - missing or invalid session
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: unauthorized
+        '404':
+          description: User not found
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: user not found
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                createLoyalty:
+                  summary: Failed to create loyalty record
+                  value: failed to create loyalty
+                updateFailed:
+                  summary: Failed to update balance
+                  value: failed to update balance
+                historyFailed:
+                  summary: Failed to insert balance history
+                  value: failed to insert balance history
+                commitFailed:
+                  summary: Failed to commit transaction
+                  value: failed to commit transaction
+
+  /api/users/get:
+    get:
+      tags:
+        - users
+      summary: Get user by id
+      description: Returns customer info by id.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Customer id.
+      responses:
+        '302':
+          description: User returned (implementation uses 302 Found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized - missing or invalid session
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: unauthorized
+        '500':
+          description: Internal server error
+
+  /api/users/list:
+    get:
+      tags:
+        - users
+      summary: List users
+      description: Returns list of customers.
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Users list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized - missing or invalid session
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: unauthorized
+        '500':
+          description: Internal server error
+
+  /api/users/create:
+    post:
+      tags:
+        - users
+      summary: Create user
+      description: Creates customer.
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized - missing or invalid session
+        '500':
+          description: Internal server error
+
+  /api/users/delete:
+    delete:
+      tags:
+        - users
+      summary: Delete user
+      description: Deletes customer by id.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Customer id.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          description: Unauthorized - missing or invalid session
+        '500':
+          description: Internal server error
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session_id
+      description: Session cookie set after successful login via /auth/callback
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        first_name:
+          type: string
+          example: Mock
+        last_name:
+          type: string
+          example: User
+
+    AuthResponse:
+      type: object
+      required:
+        - message
+        - user
+        - session_id
+      properties:
+        message:
+          type: string
+          example: mock login successful
+        user:
+          $ref: '#/components/schemas/User'
+        session_id:
+          type: string
+          example: abc123
+
+    PointsInfo:
+      type: object
+      properties:
+        user_id:
+          type: string
+          example: "1"
+          description: Customer id.
+        balance:
+          type: integer
+          example: 100
+          description: Total loyalty points balance.
+        level:
+          type: string
+          example: Silver
+          description: Loyalty level associated with the current balance.
+
+    UsePointsRequest:
+      type: object
+      required:
+        - amount
+      properties:
+        amount:
+          type: integer
+          example: 5
+          description: Number of points to deduct. Must be positive.
+
+    UsePointsResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: success
+
+    AddPointsRequest:
+      type: object
+      required:
+        - amount
+        - reason_id
+      properties:
+        amount:
+          type: integer
+          example: 10
+          description: Number of points to add. Must be positive.
+        reason_id:
+          type: integer
+          example: 1
+          description: Reason ID for adding points.
+
+    AddPointsResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: success
