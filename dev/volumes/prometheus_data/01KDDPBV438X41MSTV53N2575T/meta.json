@@ -1,0 +1,18 @@
+{
+	"ulid": "01KDDPBV438X41MSTV53N2575T",
+	"minTime": 1766753992864,
+	"maxTime": 1766757600000,
+	"stats": {
+		"numSamples": 2124,
+		"numFloatSamples": 2124,
+		"numSeries": 118,
+		"numChunks": 118
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01KDDPBV438X41MSTV53N2575T"
+		]
+	},
+	"version": 1
+}

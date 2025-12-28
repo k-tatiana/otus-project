@@ -1,0 +1,484 @@
+# Docker Compose for otus-project
+version: '3.9'
+
+services:
+  single-server:
+    build:
+        context: ..
+        dockerfile: Dockerfile
+    container_name: otus_server
+    depends_on:
+        - migrate-master
+        - redis-master
+        - rabbitmq-1
+    ports:
+        - "8100:8100"
+    env_file:
+        - .env
+    restart: on-failure 
+    healthcheck:
+        test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
+        interval: 30s
+        timeout: 5s
+        retries: 3
+        start_period: 5s
+    networks:
+        - otus_network
+    profiles:
+      - base
+
+  server-1:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: otus_server_1
+    depends_on:
+      - postgres-master
+      - postgres-slave
+      - redis-master
+      - rabbitmq-1
+    ports:
+      - "8101:8100"
+    env_file:
+      - .env
+    restart: on-failure 
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+
+  server-2:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: otus_server_2
+    depends_on:
+      - postgres-master
+      - postgres-slave
+      - redis-master
+      - rabbitmq-1
+    ports:
+      - "8102:8100"
+    env_file:
+      - .env
+    restart: on-failure 
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+
+  server-3:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: otus_server_3
+    depends_on:
+      - postgres-master
+      - postgres-slave
+      - redis-master
+      - rabbitmq-1
+    ports:
+      - "8103:8100"
+    env_file:
+      - .env
+    restart: on-failure 
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: otus_haproxy
+    depends_on:
+      - server-1
+      - server-2
+      - server-3
+    ports:
+      - "8100:8100"
+      - "8404:8404"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8404/stats"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+
+  ticker-haproxy:
+    build:
+      context: .. 
+      dockerfile: Dockerfile.ticker
+    container_name: otus_ticker_haproxy
+    depends_on:
+      - server-1
+      - server-2
+      - server-3
+    environment:
+      - BASE_URL=http://haproxy:8100
+      - SESSION_ID=cron-session-id
+      - DATABASE_URL=postgres://otus:otuspass@postgres-master:5432/otusdb?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq-1:5672/
+      - QUEUE_AVAILABLE=true
+      - MARKETING_CRON=10s
+      - ORDERS_CRON=20s
+      - USING_POINTS_CRON=20s
+    restart: on-failure
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+  
+  ticker-base:
+    build:
+      context: .. 
+      dockerfile: Dockerfile.ticker
+    container_name: otus_ticker_base
+    depends_on:
+      - single-server
+    environment:
+      - BASE_URL=http://single-server:8100
+      - SESSION_ID=cron-session-id
+      - DATABASE_URL=postgres://otus:otuspass@postgres-master:5432/otusdb?sslmode=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq-1:5672/
+      - QUEUE_AVAILABLE=true
+      - MARKETING_CRON=10s
+      - ORDERS_CRON=20s
+      - USING_POINTS_CRON=20s
+    restart: on-failure
+    networks:
+      - otus_network
+    profiles:
+      - base
+
+  rabbitmq-1:
+    image: rabbitmq:3.13-management-alpine
+    container_name: otus_rabbitmq_1
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_ERLANG_COOKIE: secret_cookie
+      RABBITMQ_NODENAME: rabbit@rabbitmq-1
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: on-failure
+    networks:
+      - otus_network
+    volumes:
+      - ./volumes/rabbitmq_data_1:/var/lib/rabbitmq
+    profiles:
+      - base
+      - maximum
+
+  rabbitmq-2:
+    image: rabbitmq:3.13-management-alpine
+    container_name: otus_rabbitmq_2
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_ERLANG_COOKIE: secret_cookie
+      RABBITMQ_NODENAME: rabbit@rabbitmq-2
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    depends_on:
+      - rabbitmq-1
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: on-failure
+    networks:
+      - otus_network
+    volumes:
+      - ./volumes/rabbitmq_data_2:/var/lib/rabbitmq
+    command: bash -c "rabbitmq-server & sleep 10 && rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl join_cluster rabbit@rabbitmq-1 && rabbitmqctl start_app && wait"
+    profiles:
+      - maximum
+
+  rabbitmq-3:
+    image: rabbitmq:3.13-management-alpine
+    container_name: otus_rabbitmq_3
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_ERLANG_COOKIE: secret_cookie
+      RABBITMQ_NODENAME: rabbit@rabbitmq-3
+    ports:
+      - "5674:5672"
+      - "15674:15672"
+    depends_on:
+      - rabbitmq-1
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: on-failure
+    networks:
+      - otus_network
+    volumes:
+      - ./volumes/rabbitmq_data_3:/var/lib/rabbitmq
+    command: bash -c "rabbitmq-server & sleep 10 && rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl join_cluster rabbit@rabbitmq-1 && rabbitmqctl start_app && wait"
+    profiles:
+      - maximum
+
+  postgres-master:
+    image: postgres:15-alpine
+    container_name: otus_postgres
+    environment:
+      POSTGRES_USER: otus
+      POSTGRES_PASSWORD: otuspass
+      POSTGRES_DB: otusdb
+    volumes:
+      - ./volumes/postgres_data:/var/lib/postgresql/data
+      - ../migrations:/migrations:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otus -d otusdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - otus_network
+    profiles:
+      - base
+      - maximum
+
+  postgres-slave:
+    image:  postgres:15-alpine
+    container_name: otus_postgres_slave
+    environment:
+      POSTGRES_USER: otus
+      POSTGRES_PASSWORD: otuspass
+      POSTGRES_DB: otusdb
+    volumes:
+      - ../migrations:/migrations:ro
+      - ./volumes/postgres_slave_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otus -d otusdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+
+  migrate-master:
+    image: migrate/migrate:v4.15.2
+    container_name: otus_migrate
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://otus:otuspass@postgres-master:5432/otusdb?sslmode=disable
+    volumes:
+      - ../migrations:/migrations:ro
+    entrypoint: ["migrate"]
+    command: ["-path=/migrations", "-database", "postgres://otus:otuspass@postgres-master:5432/otusdb?sslmode=disable", "up"]
+    restart: "no"
+    networks:
+      - otus_network
+    profiles:
+      - base
+      - maximum
+
+  migrate-slave:
+    image: migrate/migrate:v4.15.2
+    container_name: otus_migrate_slave
+    depends_on:
+      postgres-slave:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://otus:otuspass@postgres-slave:5432/otusdb?sslmode=disable
+    volumes:
+      - ../migrations:/migrations:ro
+    entrypoint: ["migrate"]
+    command: ["-path=/migrations", "-database", "postgres://otus:otuspass@postgres-slave:5432/otusdb?sslmode=disable", "up"]
+    restart: "no"
+    networks:
+      - otus_network
+    profiles:
+      - maximum
+
+  redis-master:
+    image: redis:7-alpine
+    container_name: otus_redis_master
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./volumes/redis_master_data:/data
+    command: redis-server --appendonly yes --port 6379
+    restart: unless-stopped
+    networks:
+      - otus_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    profiles:
+      - base
+      - maximum
+
+  redis-replica:
+    image: redis:7-alpine
+    container_name: otus_redis_replica
+    ports:
+      - "6380:6380"
+    volumes:
+      - ./volumes/redis_replica_data:/data
+    command: redis-server --port 6380 --slaveof redis-master 6379 --appendonly yes
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - otus_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    profiles:
+      - maximum
+
+  prometheus-base:
+    image: prom/prometheus:latest
+    container_name: otus_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus-base.yml:/etc/prometheus/prometheus.yml:ro
+      - ./volumes/prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - single-server
+    restart: unless-stopped
+    networks:
+      - otus_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - base
+
+  prometheus-maximum:
+    image: prom/prometheus:latest
+    container_name: otus_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus-maximum.yml:/etc/prometheus/prometheus.yml:ro
+      - ./volumes/prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - haproxy
+    restart: unless-stopped
+    networks:
+      - otus_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - maximum
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: otus_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - ./volumes/grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - otus_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    profiles:
+      - base
+      - maximum
+
+volumes:
+  postgres_data:
+  rabbitmq_data_1:
+  rabbitmq_data_2:
+  rabbitmq_data_3:
+  redis_master_data:
+  redis_replica_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  otus_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
