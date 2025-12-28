@@ -196,7 +196,7 @@ services:
     networks:
       - otus_network
     volumes:
-      - ./volumes/rabbitmq_data_1:/var/lib/rabbitmq
+      - ../volumes/rabbitmq_data_1:/var/lib/rabbitmq
     profiles:
       - base
       - maximum
@@ -224,7 +224,7 @@ services:
     networks:
       - otus_network
     volumes:
-      - ./volumes/rabbitmq_data_2:/var/lib/rabbitmq
+      - ../volumes/rabbitmq_data_2:/var/lib/rabbitmq
     command: bash -c "rabbitmq-server & sleep 10 && rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl join_cluster rabbit@rabbitmq-1 && rabbitmqctl start_app && wait"
     profiles:
       - maximum
@@ -252,7 +252,7 @@ services:
     networks:
       - otus_network
     volumes:
-      - ./volumes/rabbitmq_data_3:/var/lib/rabbitmq
+      - ../volumes/rabbitmq_data_3:/var/lib/rabbitmq
     command: bash -c "rabbitmq-server & sleep 10 && rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl join_cluster rabbit@rabbitmq-1 && rabbitmqctl start_app && wait"
     profiles:
       - maximum
@@ -265,7 +265,7 @@ services:
       POSTGRES_PASSWORD: otuspass
       POSTGRES_DB: otusdb
     volumes:
-      - ./volumes/postgres_data:/var/lib/postgresql/data
+      - ../volumes/postgres_data:/var/lib/postgresql/data
       - ../migrations:/migrations:ro
     ports:
       - "5432:5432"
@@ -290,7 +290,7 @@ services:
       POSTGRES_DB: otusdb
     volumes:
       - ../migrations:/migrations:ro
-      - ./volumes/postgres_slave_data:/var/lib/postgresql/data
+      - ../volumes/postgres_slave_data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
     depends_on:
@@ -350,7 +350,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./volumes/redis_master_data:/data
+      - ../volumes/redis_master_data:/data
     command: redis-server --appendonly yes --port 6379
     restart: unless-stopped
     networks:
@@ -371,7 +371,7 @@ services:
     ports:
       - "6380:6380"
     volumes:
-      - ./volumes/redis_replica_data:/data
+      - ../volumes/redis_replica_data:/data
     command: redis-server --port 6380 --slaveof redis-master 6379 --appendonly yes
     depends_on:
       redis-master:
@@ -395,7 +395,7 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus-base.yml:/etc/prometheus/prometheus.yml:ro
-      - ./volumes/prometheus_data:/prometheus
+      - ../volumes/prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -422,7 +422,7 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus-maximum.yml:/etc/prometheus/prometheus.yml:ro
-      - ./volumes/prometheus_data:/prometheus
+      - ../volumes/prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -452,7 +452,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
-      - ./volumes/grafana_data:/var/lib/grafana
+      - ../volumes/grafana_data:/var/lib/grafana
     restart: unless-stopped
     networks:
       - otus_network
