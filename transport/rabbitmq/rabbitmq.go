@@ -139,34 +139,34 @@ func (r *RabbitMQ) Publish(ctx context.Context, exchange, routingKey string, mes
 	}
 	defer ch.Close()
 
-	// Declare the exchange
-	err = ch.ExchangeDeclare(
-		exchange, // name
-		"direct", // type
-		true,     // durable
-		false,    // autoDelete
-		false,    // internal
-		false,    // noWait
-		nil,      // args
-	)
-	if err != nil {
-		r.logger.Error("Failed to declare exchange", zap.String("exchange", exchange), zap.Error(err))
-		return err
-	}
+	// // Declare the exchange
+	// err = ch.ExchangeDeclare(
+	// 	exchange, // name
+	// 	"direct", // type
+	// 	true,     // durable
+	// 	false,    // autoDelete
+	// 	false,    // internal
+	// 	false,    // noWait
+	// 	nil,      // args
+	// )
+	// if err != nil {
+	// 	r.logger.Error("Failed to declare exchange", zap.String("exchange", exchange), zap.Error(err))
+	// 	return err
+	// }
 
-	// Declare the queue
-	_, err = ch.QueueDeclare(
-		"",    // queue name (empty means auto-generated)
-		true,  // durable
-		false, // autoDelete
-		false, // exclusive
-		false, // noWait
-		nil,   // args
-	)
-	if err != nil {
-		r.logger.Error("Failed to declare queue", zap.String("exchange", exchange), zap.Error(err))
-		return err
-	}
+	// // Declare the queue
+	// _, err = ch.QueueDeclare(
+	// 	"",    // queue name (empty means auto-generated)
+	// 	true,  // durable
+	// 	false, // autoDelete
+	// 	false, // exclusive
+	// 	false, // noWait
+	// 	nil,   // args
+	// )
+	// if err != nil {
+	// 	r.logger.Error("Failed to declare queue", zap.String("exchange", exchange), zap.Error(err))
+	// 	return err
+	// }
 
 	// Publish the message
 	err = ch.PublishWithContext(

@@ -175,7 +175,7 @@ func (h *PointsHandler) UsePointsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_, err = tx.Exec(ctx, "INSERT INTO balance_history (customer_id, points, created_at) VALUES ($1, $2, $3)", userID, -req.Amount, time.Now())
+	_, err = tx.Exec(ctx, "INSERT INTO balance_history (customer_id, points, created_at, reason_id) VALUES ($1, $2, $3, $4)", userID, req.Amount*(-1), time.Now(), models.ReasonUsingPoints)
 	if err != nil {
 		h.logger.Error("failed to insert balance history", zap.Error(err))
 		http.Error(w, "failed to insert balance history", http.StatusInternalServerError)
