@@ -16,6 +16,12 @@ type Client struct {
 
 const RedisTTL = 1 * time.Hour
 
+type ErrNil struct{}
+
+func (e ErrNil) Error() string {
+	return "redis: nil"
+}
+
 func New(ctx context.Context, redisURL string, logger *zap.Logger) (*Client, error) {
 	if redisURL == "" {
 		return nil, errors.New("redis URL is required")
@@ -26,6 +32,13 @@ func New(ctx context.Context, redisURL string, logger *zap.Logger) (*Client, err
 		logger.Error("failed to parse redis URL", zap.Error(err))
 		return nil, err
 	}
+
+	// Configure connection pool
+	opt.PoolSize = 50                        // Maximum number of connections
+	opt.MinIdleConns = 10                    // Minimum number of idle connections
+	opt.ConnMaxLifetime = 30 * time.Minute   // Maximum age of a connection
+	opt.PoolTimeout = 200 * time.Millisecond // Time to wait for connection from pool
+	opt.ConnMaxIdleTime = 5 * time.Minute    // How long connections can be idle
 
 	rdb := redis.NewClient(opt)
 
@@ -43,7 +56,14 @@ func New(ctx context.Context, redisURL string, logger *zap.Logger) (*Client, err
 }
 
 func (c *Client) Get(ctx context.Context, key string) (string, error) {
-	return c.client.Get(ctx, key).Result()
+	resp, err := c.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", ErrNil{}
+	}
+	if err != nil {
+		return "", err
+	}
+	return resp, nil
 }
 
 func (c *Client) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {

@@ -41,6 +41,14 @@ services:
       - "8101:8100"
     env_file:
       - .env
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     restart: on-failure 
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
@@ -67,6 +75,14 @@ services:
       - "8102:8100"
     env_file:
       - .env
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     restart: on-failure 
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
@@ -93,6 +109,14 @@ services:
       - "8103:8100"
     env_file:
       - .env
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     restart: on-failure 
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8100/ping || exit 1"]
@@ -213,7 +237,8 @@ services:
       - "5673:5672"
       - "15673:15672"
     depends_on:
-      - rabbitmq-1
+      rabbitmq-1:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -229,41 +254,12 @@ services:
     profiles:
       - maximum
 
-  rabbitmq-3:
-    image: rabbitmq:3.13-management-alpine
-    container_name: otus_rabbitmq_3
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-      RABBITMQ_ERLANG_COOKIE: secret_cookie
-      RABBITMQ_NODENAME: rabbit@rabbitmq-3
-    ports:
-      - "5674:5672"
-      - "15674:15672"
-    depends_on:
-      - rabbitmq-1
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: on-failure
-    networks:
-      - otus_network
-    volumes:
-      - ../volumes/rabbitmq_data_3:/var/lib/rabbitmq
-    command: bash -c "rabbitmq-server & sleep 10 && rabbitmqctl stop_app && rabbitmqctl reset && rabbitmqctl join_cluster rabbit@rabbitmq-1 && rabbitmqctl start_app && wait"
-    profiles:
-      - maximum
-
   rabbitmq-lb:
     image: nginx:1.27-alpine
     container_name: otus_rabbitmq_lb
     depends_on:
       - rabbitmq-1
       - rabbitmq-2
-      - rabbitmq-3
     ports:
       - "5675:5672"
     volumes:

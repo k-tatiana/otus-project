@@ -1,5 +1,7 @@
 # Prometheus Metrics
 
+Address for Grafana: http://otus_prometheus:9090
+
 This application exports Prometheus metrics for monitoring and observability.
 
 ## Available Metrics

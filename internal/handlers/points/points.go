@@ -1,14 +1,18 @@
 package points
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/k-tatiana/otus-project/internal/services"
@@ -18,15 +22,23 @@ import (
 	redis "github.com/k-tatiana/otus-project/transport/redis"
 )
 
-const pointsRedisTTL = 24 * time.Hour
+const (
+	pointsRedisTTL = 24 * time.Hour
+)
 
 // PointsHandler handles loyalty points related requests.
 type PointsHandler struct {
 	sessionStore *services.SessionStore
 	pg           *postgres.DB
 	redis        *redis.Client
+	redisMaster  *redis.Client
 	ws           *websocket.WebSocketHandler
 	logger       *zap.Logger
+	// Семафор для ограничения горутин
+	workerSem *semaphore.Weighted
+	// Пул для переиспользования горутин
+	workerPool sync.Pool
+	maxWorkers int64
 }
 
 // NewPointsHandler creates a new PointsHandler instance.
@@ -34,82 +46,104 @@ func NewPointsHandler(
 	sessionStore *services.SessionStore,
 	pg *postgres.DB,
 	redis *redis.Client,
+	redisMaster *redis.Client,
 	ws *websocket.WebSocketHandler,
 	logger *zap.Logger,
+	maxWorkers int64,
 ) *PointsHandler {
+	// Максимум 1000 одновременных горутин
+
+	if redis == nil {
+		redis = redisMaster
+	}
 	return &PointsHandler{
 		pg:           pg,
 		redis:        redis,
+		redisMaster:  redisMaster,
 		ws:           ws,
 		sessionStore: sessionStore,
 		logger:       logger,
+		workerSem:    semaphore.NewWeighted(maxWorkers),
+		workerPool: sync.Pool{
+			New: func() interface{} {
+				return make(chan struct{}, 1)
+			},
+		},
+		maxWorkers: maxWorkers,
 	}
 }
 
 // GetPointsHandler returns loyalty points information for the current user.
 func (h *PointsHandler) GetPointsHandler(w http.ResponseWriter, r *http.Request) {
-	var balance int
-	var level string
-
+	// Set timeout for the entire operation
 	ctx := r.Context()
-
 	userID := r.URL.Query().Get("user_id")
 
-	if userID == "" {
-		h.logger.Error("user_id is required")
-		http.Error(w, "user_id is required", http.StatusBadRequest)
-		return
-	}
+	if err := h.workerSem.Acquire(ctx, 1); err != nil {
+		h.logger.Warn("failed to acquire worker slot, skipping cache update",
+			zap.String("user_id", userID),
+			zap.Error(err))
+	} else {
+		defer h.workerSem.Release(1)
 
-	var redisKey = "points:" + userID
-	existsInCache, err := h.redis.Exists(ctx, redisKey)
-	if err != nil {
-		h.logger.Error("failed to check points in cache", zap.Error(err))
-		http.Error(w, "failed to check points in cache", http.StatusInternalServerError)
-		return
-	}
-	if existsInCache > 0 {
+		var balance int
+		var level string
+
+		if userID == "" {
+			h.logger.Error("user_id is required")
+			http.Error(w, "user_id is required", http.StatusBadRequest)
+			return
+		}
+
+		var redisKey = "points:" + userID
 		balanceLevel, err := h.redis.Get(ctx, redisKey)
-		if err != nil {
+		if err == nil {
+			balanceLevelArr := strings.Split(balanceLevel, "_")
+			balance, _ = strconv.Atoi(balanceLevelArr[0])
+			level = string(balanceLevelArr[1])
+		} else if !errors.As(err, &redis.ErrNil{}) {
 			h.logger.Error("failed to get points from cache", zap.Error(err))
 			http.Error(w, "failed to get points from cache", http.StatusInternalServerError)
 			return
-		}
-		balanceLevelArr := strings.Split(balanceLevel, "_")
-		balance, _ = strconv.Atoi(balanceLevelArr[0])
-		level = string(balanceLevelArr[1])
-	} else {
-		// Query from slave (read replica) for read operations
-		err := h.pg.Slave.QueryRow(ctx,
-			`SELECT loyalty.balance, loyalty_levels.name as level_name
-		FROM loyalty 
-		LEFT JOIN loyalty_levels ON loyalty.level_id = loyalty_levels.id 
-		WHERE loyalty.customer_id = $1`, userID,
-		).Scan(&balance, &level)
-		if err != nil && err != pgx.ErrNoRows {
-			h.logger.Error("failed to fetch points", zap.Error(err))
-			http.Error(w, "failed to fetch points", http.StatusInternalServerError)
-			return
+		} else {
+			h.logger.Error("failed to get points from cache", zap.Error(err))
+			// Query from slave (read replica) for read operations using a simpler query
+			err := h.pg.Slave.QueryRow(ctx,
+				`SELECT l.balance, COALESCE(ll.name, 'Bronze') as level_name
+			FROM loyalty l
+			LEFT JOIN loyalty_levels ll ON l.level_id = ll.id
+			WHERE l.customer_id = $1
+			LIMIT 1`, userID,
+			).Scan(&balance, &level)
+			if err != nil && err != pgx.ErrNoRows {
+				h.logger.Error("failed to fetch points", zap.Error(err))
+				http.Error(w, "failed to fetch points", http.StatusInternalServerError)
+				return
+			}
+
+			// Async cache update
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+				defer cancel()
+
+				if err := h.redisMaster.Set(ctx, redisKey, fmt.Sprintf("%d_%s", balance, level), pointsRedisTTL); err != nil {
+					h.logger.Error("failed to set up cache for user", zap.String("user_id", userID), zap.Error(err))
+				}
+			}()
 		}
 
-		if err = h.redis.Set(ctx, redisKey, fmt.Sprintf("%d_%s", balance, level), pointsRedisTTL); err != nil {
-			h.logger.Error("failed to set up cache for user", zap.String("user_id", userID), zap.Error(err))
-			http.Error(w, "failed to set up cache", http.StatusInternalServerError)
+		// Mock response for now
+		w.Header().Set("Content-Type", "application/json")
+		resp := models.PointsInfo{
+			UserID:  userID,
+			Balance: balance,
+			Level:   level,
+		}
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			h.logger.Error("failed to encode response", zap.Error(err))
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			return
 		}
-	}
-
-	// Mock response for now
-	w.Header().Set("Content-Type", "application/json")
-	resp := models.PointsInfo{
-		UserID:  userID,
-		Balance: balance,
-		Level:   level,
-	}
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		h.logger.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		return
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -22,8 +23,6 @@ import (
 	"github.com/k-tatiana/otus-project/transport/rabbitmq"
 	"github.com/k-tatiana/otus-project/transport/redis"
 )
-
-var ()
 
 // RunServer starts the HTTP server on the provided port (if empty, default 8080).
 func RunServer() {
@@ -44,13 +43,22 @@ func RunServer() {
 	}
 	defer pg.Close(logger)
 
-	redis, err := redis.New(ctx, cfg.RedisURL, logger)
-	if err != nil {
-		logger.Fatal("Failed to initialize redis connections", zap.Error(err))
+	var redisReplica *redis.Client
+	if cfg.RedisSlaveURL != nil {
+		redisReplica, err = redis.New(ctx, *cfg.RedisSlaveURL, logger)
+		if err != nil {
+			logger.Fatal("Failed to initialize redis connections", zap.Error(err))
+		}
+		defer redisReplica.Close()
 	}
-	defer redis.Close()
 
-	sessionStore := services.NewSessionStore(redis)
+	redisMaster, err := redis.New(ctx, cfg.RedisMasterURL, logger)
+	if err != nil {
+		logger.Fatal("Failed to initialize redis master connections", zap.Error(err))
+	}
+	defer redisMaster.Close()
+
+	sessionStore := services.NewSessionStore(redisMaster)
 
 	// Initialize RabbitMQ connection
 	rmq := rabbitmq.NewRabbitMQ(logger)
@@ -68,6 +76,18 @@ func RunServer() {
 
 	// Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
+
+	// Register pprof handlers
+	r.HandleFunc("/debug/pprof/", pprof.Index)
+	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	r.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	r.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	r.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	r.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	r.Handle("/debug/pprof/block", pprof.Handler("block"))
+	r.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 
 	r.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -89,7 +109,7 @@ func RunServer() {
 	// Protected API routes.
 	api := r.PathPrefix("/api").Subrouter()
 	api.Use(middlewares.AuthMiddleware(sessionStore))
-	pointsHandler := points.NewPointsHandler(sessionStore, pg, redis, wsHandler, logger)
+	pointsHandler := points.NewPointsHandler(sessionStore, pg, redisReplica, redisMaster, wsHandler, logger, cfg.MaxWorkers)
 	api.HandleFunc("/points/get", pointsHandler.GetPointsHandler).Methods(http.MethodGet)
 	api.HandleFunc("/points/use", pointsHandler.UsePointsHandler).Methods(http.MethodPost)
 	api.HandleFunc("/points/add", pointsHandler.AddPointsHandler).Methods(http.MethodPost)
